@@ -4,90 +4,93 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jinzhu/gorm"
+	_ "github.com/jinzhu/gorm/dialects/sqlite"
 )
 
-// book represents data about a book.
-type book struct {
-	ID     string  `json:"id"`
+// Book representa dados sobre um livro.
+type Book struct {
+	ID     string  `json:"id" gorm:"primary_key"`
 	Title  string  `json:"title"`
 	Author string  `json:"author"`
 	Price  float64 `json:"price"`
 }
 
-// books slice to seed book data.
-var books = []book{
-	{ID: "1", Title: "The Great Gatsby", Author: "F. Scott Fitzgerald", Price: 10.99},
-	{ID: "2", Title: "To Kill a Mockingbird", Author: "Harper Lee", Price: 12.99},
-	{ID: "3", Title: "1984", Author: "George Orwell", Price: 15.99},
-}
+var db *gorm.DB
 
 func main() {
+	var err error
+	db, err = gorm.Open("sqlite3", "test.db")
+	if err != nil {
+		panic("falha ao conectar ao banco de dados")
+	}
+	defer db.Close()
+
+	// Migrar o esquema
+	db.AutoMigrate(&Book{})
+
 	router := gin.Default()
-	router.GET("/books", getBooks)
-	router.POST("/books", postBook)
-	router.PUT("/books/:id", updateBook)
-	router.DELETE("/books/:id", deleteBook)
+	router.GET("/livros", getBooks)
+	router.POST("/livros", postBook)
+	router.PUT("/livros/:id", updateBook)
+	router.DELETE("/livros/:id", deleteBook)
 	router.Run("localhost:8080")
 }
 
-// getBooks responds with the list of all books as JSON.
+// getBooks responde com a lista de todos os livros em JSON.
 func getBooks(c *gin.Context) {
+	var books []Book
+	db.Find(&books)
 	c.IndentedJSON(http.StatusOK, books)
 }
 
-// postBook adds a book from JSON received in the request body.
+// postBook adiciona um livro a partir do JSON recebido no corpo da requisição.
 func postBook(c *gin.Context) {
-	var newBook book
+	var newBook Book
 
-	// Call BindJSON to bind the received JSON to
-	// newBook.
+	// Chame BindJSON para vincular o JSON recebido a newBook.
 	if err := c.BindJSON(&newBook); err != nil {
 		return
 	}
 
-	// Add the new book to the slice.
-	books = append(books, newBook)
+	// Adicione o novo livro ao banco de dados.
+	db.Create(&newBook)
 	c.IndentedJSON(http.StatusCreated, newBook)
 }
 
-// updateBook updates the details of a specific book.
+// updateBook atualiza os detalhes de um livro específico.
 func updateBook(c *gin.Context) {
 	id := c.Param("id")
 
-	var updatedBook book
+	var updatedBook Book
 
-	// Call BindJSON to bind the received JSON to
-	// updatedBook.
+	// Chame BindJSON para vincular o JSON recebido a updatedBook.
 	if err := c.BindJSON(&updatedBook); err != nil {
 		return
 	}
 
-	// Find the book with the given ID and update its details.
-	for i, b := range books {
-		if b.ID == id {
-			books[i] = updatedBook
-			c.IndentedJSON(http.StatusOK, updatedBook)
-			return
-		}
+	// Encontre o livro com o ID fornecido e atualize seus detalhes.
+	var book Book
+	if db.First(&book, id).RecordNotFound() {
+		c.IndentedJSON(http.StatusNotFound, gin.H{"message": "Livro não encontrado"})
+		return
 	}
 
-	// If no book with the given ID is found, return 404.
-	c.IndentedJSON(http.StatusNotFound, gin.H{"message": "Book not found"})
+	db.Model(&book).Updates(updatedBook)
+	c.IndentedJSON(http.StatusOK, updatedBook)
 }
 
-// deleteBook removes a specific book from the slice.
+// deleteBook remove um livro específico do banco de dados.
 func deleteBook(c *gin.Context) {
 	id := c.Param("id")
 
-	// Find the index of the book with the given ID and remove it from the slice.
-	for i, b := range books {
-		if b.ID == id {
-			books = append(books[:i], books[i+1:]...)
-			c.IndentedJSON(http.StatusOK, gin.H{"message": "Book deleted"})
-			return
-		}
+	// Encontre o livro com o ID fornecido e exclua-o do banco de dados.
+	var book Book
+	if db.First(&book, id).RecordNotFound() {
+		c.IndentedJSON(http.StatusNotFound, gin.H{"message": "Livro não encontrado"})
+		return
 	}
 
-	// If no book with the given ID is found, return 404.
-	c.IndentedJSON(http.StatusNotFound, gin.H{"message": "Book not found"})
+	db.Delete(&book)
+	c.IndentedJSON(http.StatusOK, gin.H{"message": "Livro deletado"})
 }
